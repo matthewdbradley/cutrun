@@ -1,0 +1,201 @@
+inpDir = params.inpDir
+seqDir = params.seqDir
+outDir = file(params.outDir)
+sample = params.sample
+def input = []
+sample.eachWithIndex { it,i ->
+	input[i] = file("${inpDir}/$it*")
+}
+def fastq = []
+sample.eachWithIndex { it,i ->
+	fastq[i] = file("${seqDir}/$it*")
+}
+allFastQ = input + fastq
+allFastQ.each { println it }
+refDir = file(params.reference)
+qualityScore = params.qualityScore
+adapterSeq = file(params.adapterSeq)
+genomebed = params.genomebed
+dsInput = params.dsInput
+dsTarget = params.dsTarget
+outDir.mkdirs()
+
+println "Running pipeline for ${sample}"
+
+process downsample{
+
+	publishDir "$outDir", mode: 'copy'
+
+	input:
+	each file('*') from allFastQ
+	path outDir
+	val dsInput
+	val dsTarget
+
+	output:
+	path "downsampled/" into downsamppath
+	file("downsampled/*") into dsFastQ
+
+	"""
+	mkdir -p downsampled/
+	if [ -a *INPUT* ]
+	then
+		seqtk sample -s100 * $dsInput > downsampled/${sName%%.fastq.gz}.downsampled.fastq.gz
+	else 
+		seqtk sample -s100 * $dsTarget > downsampled/${sName%%.fastq.gz}.downsampled.fastq.gz
+	fi
+	"""	
+}
+
+dsFastQ.into { dsFastQC ; dsFastQ_trim }
+
+process runFastQC{
+	beforeScript { 'module load FastQC' }	
+	publishDir "$outDir", mode: 'copy'
+
+	input:
+	each file('*') from dsFastQC
+	path outDir	
+
+	output:
+	path "fastqc/" into fastqcpath
+	file("fastqc/*.zip") into fastQC_files
+
+	"""
+	mkdir -p fastqc/
+	fastqc --outdir fastqc/ -t1 *
+	"""
+}
+
+sampleNames = []
+allFastQ.eachWithIndex { it,i ->
+        sampleNames[i] = it.getAt(0).name.replaceAll(/R[1,2].fastq.gz/,"")
+}
+
+process trimReads{
+	tag "<PHRED${qualityScore}"
+	cpus { 16 }
+	memory { 32.GB }
+	publishDir "$outDir", mode: 'copy'
+
+	input:
+	file(fq) from Channel.fromList(dsFastQ_trim)
+	val sampleName from Channel.fromList(sampleNames)
+	path outDir
+	file("adapters.fa") from adapterSeq
+
+	output:
+	path "trimmed/" into trimmed
+	path "untrimmed/" into untrimmed
+	file("trimmed/${sampleName}R1.trimmed.fastq") into read1
+	file("trimmed/${sampleName}R2.trimmed.fastq") into read2
+	file("trimmed/${sampleName}trimmomatic.out")
+
+	"""
+	mkdir -p untrimmed
+	mkdir -p trimmed
+	trimmomatic PE -threads 16 -trimlog trimmed/${sampleName}.log *R1* *R2* trimmed/${sampleName}R1.trimmed.fastq untrimmed/${sampleName}R2.untrimmed.fastq trimmed/${sampleName}R2.trimmed.fastq untrimmed/${sampleName}R2.untrimmed.fastq ILLUMINACLIP:adapters.fa:2:15:4:4:true LEADING:20 TRAILING:20 SLIDINGWINDOW:4:${qualityScore} MINLEN:25 > trimmed/${sampleName}trimmomatic.out
+	"""
+}
+
+process align{
+	tag "Aligning samples to GRCh38"
+	cpus { 16 }
+	memory { 32.GB }
+	beforeScript {
+		'module load bowtie2'
+		'module load samtools'
+	}
+	publishDir "$outDir", mode: 'copy'
+
+	input: 
+		val sampleName from Channel.fromList(sampleNames)
+		path outDir
+		file "${sampleName}R1.trimmed.fastq" from read1
+		file "${sampleName}R2.trimmed.fastq" from read2
+		path refDir
+		
+	output: 
+		path "bam" into bampath
+		file("bam/${sampleName}.bam") into alignments
+
+	"""
+	mkdir -p bam
+	bowtie2 -p 16 -q --very-sensitive-local --phred33 -I 10 -X 700 -x $refDir/genome -1 ${sampleName}R1.trimmed.fastq -2 ${sampleName}R2.trimmed.fastq -S ${sampleName}.sam
+	samtools view -bS ${sampleName}.sam > bam/${sampleName}.bam
+	rm -rf ${sampleName}.sam
+	"""
+}
+
+process dedup{
+	cpus { 16 } 
+	beforeScript { 
+		'module load samtools' 
+	}
+	memory { 64.GB }
+	publishDir '$outDir/bam/', mode: 'copy'
+
+	input:
+		val sampleName from Channel.fromList(sampleNames)
+		file "${sampleName}.bam" from alignments
+		path outDir
+	
+	output:
+		file("${sampleName}dedup.bam") into dedup_aln
+		file("${sampleName}dupmarked.bam") into dupmarked
+		file("${sampleName}metrics.txt") into dupmark_metrics
+
+	"""
+	samtools view -bh -f 3 -F 4 -F 8 ${sampleName}.bam > ${sampleName}filtered.bam
+	picard SortSam INPUT=${sampleName}filtered.bam OUTPUT=${sampleName}sorted.bam SORT_ORDER=coordinate VALIDATION_STRINGENCY=SILENT
+	#rm -rf bam/${sampleName}filtered.bam
+	picard MarkDuplicates INPUT=${sampleName}sorted.bam OUTPUT=${sampleName}dupmarked.bam VALIDATION_STRINGENCY=SILENT METRICS_FILE=${sampleName}metrics.txt
+	samtools view -bh -F 1024 ${sampleName}dupmarked.bam > ${sampleName}dedup.bam
+	samtools index ${sampleName}dedup.bam
+	"""			
+}
+
+dedup_aln.into { dedup_macs2; dedup_normBW }
+
+process narrow_macs2{
+	
+	cpus { 16 }
+	memory { 32.GB }
+	publishDir "$outDir", mode: 'copy'
+
+	input:
+	val sampleName from Channel.fromList(sample)
+	file '*' from dedup_macs2.collect()
+
+	output:
+	path "macs2/narrow/" into macs2path
+	file("macs2/narrow/*")
+
+	"""
+	mkdir -p macs2/narrow
+	source activate macs2
+	macs2 callpeak -t ${sampleName}_CTCF_dedup.bam -c ${sampleName}_INPUT_dedup.bam -f BAMPE -n $sampleName --outdir macs2/narrow/ --q 0.05 -B --SPMR --keep-dup all
+	"""
+}
+
+process normBW{
+
+	cpus { 16 } 
+	memory { 32.GB }
+	
+	input: 
+	val sampleName from Channel.fromList(sampleNames)
+	file('*') from dedup_normBW.collect()
+	publishDir "$outDir", mode: 'copy'
+
+	output:
+	path "BWfiles" into bwfilespath
+	file('BWfiles/${sampleName}cpm.norm.bw')
+
+	"""
+	mkdir -p BWfiles
+	source activate deeptools
+	bamCoverage --bam ${sampleName}dedup.bam -o BWfiles/${sampleName}cpm.norm.bw --binSize 10 --normalizeUsing CPM --effectiveGenomeSize 2913022398 --numberOfProcessors 16 
+	"""	
+
+}
