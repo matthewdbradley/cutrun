@@ -77,6 +77,7 @@ process dedup{
 	}
 	memory { 64.GB }
 	publishDir "$outDir/bam/", mode: 'copy'
+	conda 'bioconda::picard'
 
 	input:
 		val sampleName from Channel.fromList(sampleNames)
@@ -107,6 +108,7 @@ process narrow_macs2{
 	cpus { 16 }
 	memory { 32.GB }
 	publishDir "$outDir", mode: 'copy'
+	conda 'bioconda::macs2' 	
 
 	input:
 	val sampleName from Channel.fromList(sample)
@@ -119,8 +121,35 @@ process narrow_macs2{
 	"""
 	mkdir -p macs2/narrow
 	source activate macs2
-	macs2 callpeak -t ${sampleName}_dedup.bam -c Input-${sampleName}_dedup.bam -f BAMPE -n $sampleName --outdir macs2/narrow/ -g 1.87e9 --q 0.01 --broad --nomodel --keep-dup all
+	macs2 callpeak -t ${sampleName}_dedup.bam -c Input-${sampleName}_dedup.bam -f BAMPE -n $sampleName --outdir macs2/narrow/ --broad-cutoff 0.01 --broad --keep-dup all --nomodel
 	"""
+}
+
+process spike_align{
+        tag "Aligning samples to T4 Phage Genome"
+        cpus { 16 }
+        memory { 32.GB }
+        beforeScript {
+                'module load bowtie2'
+                'module load samtools'
+        }
+        publishDir "$outDir", mode: 'copy'	
+
+        input:
+                val sampleName from Channel.fromList(sampleNames)
+                file('*') from Channel.fromList(allFastQ)
+                path refDir
+
+        output:
+                path "spike-in/" into spikein
+                file("spike-in/${sampleName}spike-in.bam") into spikeAln
+
+        """
+        mkdir -p spike-in/
+	bowtie2 -p 16 --dovetail -x $refDir/t4phage -1 ${sampleName}*R1* -2 ${sampleName}*R2* -S ${sampleName}.sam
+        samtools view -bS ${sampleName}.sam > spike-in/${sampleName}spike-in.bam
+        rm -rf ${sampleName}.sam
+        """
 }
 
 process normBW{
@@ -128,6 +157,7 @@ process normBW{
 	cpus { 16 } 
 	memory { 32.GB }
 	
+	conda 'bioconda::deeptools'
 	publishDir "$outDir", mode: 'copy'
 	
 
@@ -142,8 +172,8 @@ process normBW{
 
 	"""
 	mkdir -p BWfiles
-	source activate deeptools
-	bamCoverage --bam ${sampleName}dedup.bam -o BWfiles/${sampleName}rpkm.norm.bw --binSize 10 --normalizeUsing RPKM --ignoreForNormalization chrX --skipNAs --extendReads 150 --numberOfProcessors 16 
+	#source activate deeptools
+	bamCoverage --bam ${sampleName}dedup.bam -o BWfiles/${sampleName}rpkm.norm.bw --binSize 10 --normalizeUsing None --ignoreForNormalization chrX --skipNAs --extendReads 150 --numberOfProcessors 16 
 	"""	
 
 }
