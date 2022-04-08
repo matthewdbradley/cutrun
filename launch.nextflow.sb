@@ -1,0 +1,17 @@
+#!/bin/bash
+
+#SBATCH -c 8
+#SBATCH --mem=16G
+#SBATCH --job-name="5hmC"
+#SBATCH --mail-type=END
+#SBATCH --mail-user=bradlem4@ccf.org
+#SBATCH --array=1-8
+
+module load samtools
+module load bowtie2
+module load bedtools
+export sample_path="/home/bradlem4/beegfs/cutrun/trimmed_samples/"
+export sample=$(ls $sample_path/*R1.fastq.gz | xargs -n1 basename | nl -w1 -s' ' | grep "^$SLURM_ARRAY_TASK_ID " | cut -f2 -d' ')
+sampleName=${sample%%_R*}
+sed "s/REPL/$sampleName/g" nextflow.config > configs/${sampleName}.config
+./nextflow -C configs/$sampleName.config run peakcall.5hmc.se.nf
