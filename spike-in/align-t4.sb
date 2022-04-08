@@ -1,0 +1,14 @@
+#!/bin/bash
+
+#SBATCH -c 16 
+#SBATCH --mem=64G
+#SBATCH --mail-type=END
+#SBATCH --mail-user=bradlem4@ccf.org
+#SBATCH --array=1-8
+export sample_path="/home/bradlem4/beegfs/5hmC-output/"
+export sample=$(ls $sample_path | nl -w1 -s' ' | grep "^$SLURM_ARRAY_TASK_ID " | cut -f2 -d' ')
+mkdir -p results/$sample
+echo $sample
+module load bowtie2
+module load samtools
+bowtie2 -p 16 --dovetail -x bt2-idx/t4phage -1 /home/bradlem4/beegfs/cutrun/trimmed_samples/${sample}_R1* -2 /home/bradlem4/beegfs/cutrun/trimmed_samples/${sample}_R2* | samtools view -bS - > results/${sample}/${sample}.paired.bam

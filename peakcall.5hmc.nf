@@ -13,6 +13,7 @@ sample.eachWithIndex { it,i ->
 allFastQ = input + fastq
 allFastQ.each { println it }
 refDir = file(params.reference)
+t4refDir = file(params.t4phage)
 qualityScore = params.qualityScore
 adapterSeq = file(params.adapterSeq)
 genomebed = params.genomebed
@@ -138,7 +139,7 @@ process spike_align{
         input:
                 val sampleName from Channel.fromList(sampleNames)
                 file('*') from Channel.fromList(allFastQ)
-                path refDir
+                path t4refDir
 
         output:
                 path "spike-in/" into spikein
@@ -146,7 +147,7 @@ process spike_align{
 
         """
         mkdir -p spike-in/
-	bowtie2 -p 16 --dovetail -x $refDir/t4phage -1 ${sampleName}*R1* -2 ${sampleName}*R2* -S ${sampleName}.sam
+	bowtie2 -p 16 --dovetail -x $t4refDir/t4phage -1 ${sampleName}*R1* -2 ${sampleName}*R2* -S ${sampleName}.sam
         samtools view -bS ${sampleName}.sam > spike-in/${sampleName}spike-in.bam
         rm -rf ${sampleName}.sam
         """

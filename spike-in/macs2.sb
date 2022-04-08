@@ -1,0 +1,10 @@
+#!/bin/bash
+
+#SBATCH -c 16 
+#SBATCH --mem=64G
+#SBATCH --mail-type=END
+#SBATCH --mail-user=bradlem4@ccf.org
+#SBATCH --array=1-8
+export sample=$(ls results | nl -w1 -s' ' | grep "^$SLURM_ARRAY_TASK_ID " | cut -f2 -d' ')
+macs2 callpeak -t results/$sample/${sample}*bam -f BAMPE -n $sample -g 171316 --outdir results/$sample --broad --keep-dup all
+

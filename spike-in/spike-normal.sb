@@ -1,0 +1,21 @@
+#!/bin/bash
+
+#SBATCH -c 16 
+#SBATCH --mem=64G
+#SBATCH --mail-type=END
+#SBATCH --mail-user=bradlem4@ccf.org
+#SBATCH --array=1-8
+export sample_path="/home/bradlem4/beegfs/5hmC-output/"
+export sample=$(ls $sample_path | nl -w1 -s' ' | grep "^$SLURM_ARRAY_TASK_ID " | cut -f2 -d' ')
+mkdir -p test-results/$sample
+total_reads=`cat ${sample}.paired.out | grep "reads; of these:" | awk '{print $1}' - FS=' '`
+echo "Total reads: $total_reads"
+align_ratio=`cat ${sample}.paired.out | grep "overall alignment" | awk '{print $1}' - FS=' ' | cut -f1 -d"%"`
+echo "Align ratio: $align_ratio"
+spikein_reads=`printf "%.0f" $(echo "$total_reads * $align_ratio/100"|bc)`
+echo $"No. spike-in reads: $spikein_reads"
+echo "Sample: $sample"
+scale_factor=$( echo 10000 / $spikein_reads | bc -l)
+echo "Scaling factor: $scale_factor"
+source activate deeptools
+bamCoverage --bam /home/bradlem4/beegfs/5hmC-se-output/$sample/bam/${sample}_dedup.bam -o results/$sample/${sample}_spike.norm.bw --binSize 10 --normalizeUsing None --effectiveGenomeSize 2913022398 --ignoreForNormalization chrX --skipNAs --extendReads 150 --numberOfProcessors 16 --scaleFactor $scale_factor

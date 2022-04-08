@@ -1,0 +1,9 @@
+#!/bin/bash
+
+#SBATCH -c 16 
+#SBATCH --mem=64G
+#SBATCH --mail-type=END
+#SBATCH --mail-user=bradlem4@ccf.org
+
+module load bowtie2
+bowtie2-build --threads 16 -f t4phage.fa bt2-idx/t4phage 
