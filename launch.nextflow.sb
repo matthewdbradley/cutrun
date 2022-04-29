@@ -14,4 +14,4 @@ export sample_path="/home/bradlem4/beegfs/cutrun/trimmed_samples/"
 export sample=$(ls $sample_path/*R1.fastq.gz | xargs -n1 basename | nl -w1 -s' ' | grep "^$SLURM_ARRAY_TASK_ID " | cut -f2 -d' ')
 sampleName=${sample%%_R*}
 sed "s/REPL/$sampleName/g" nextflow.config > configs/${sampleName}.config
-./nextflow -C configs/$sampleName.config run peakcall.5hmc.se.nf
+./nextflow -C configs/$sampleName.config run peakcall.5hmc.nf

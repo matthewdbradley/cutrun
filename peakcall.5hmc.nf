@@ -16,7 +16,6 @@ refDir = file(params.reference)
 t4refDir = file(params.t4phage)
 qualityScore = params.qualityScore
 adapterSeq = file(params.adapterSeq)
-genomebed = params.genomebed
 outDir.mkdirs()
 blacklist = file(params.blacklist)
 println "Running pipeline for ${sample}"
@@ -78,7 +77,6 @@ process dedup{
 	}
 	memory { 64.GB }
 	publishDir "$outDir/bam/", mode: 'copy'
-	conda 'bioconda::picard'
 
 	input:
 		val sampleName from Channel.fromList(sampleNames)
@@ -109,7 +107,7 @@ process narrow_macs2{
 	cpus { 16 }
 	memory { 32.GB }
 	publishDir "$outDir", mode: 'copy'
-	conda 'bioconda::macs2' 	
+	conda 'bioconda::macs2'
 
 	input:
 	val sampleName from Channel.fromList(sample)
@@ -121,7 +119,7 @@ process narrow_macs2{
 
 	"""
 	mkdir -p macs2/narrow
-	source activate macs2
+	#source activate macs2
 	macs2 callpeak -t ${sampleName}_dedup.bam -c Input-${sampleName}_dedup.bam -f BAMPE -n $sampleName --outdir macs2/narrow/ --broad-cutoff 0.01 --broad --keep-dup all --nomodel
 	"""
 }
@@ -158,9 +156,8 @@ process normBW{
 	cpus { 16 } 
 	memory { 32.GB }
 	
-	conda 'bioconda::deeptools'
 	publishDir "$outDir", mode: 'copy'
-	
+	conda 'bioconda::deeptools'	
 
 	input: 
 	val sampleName from Channel.fromList(sampleNames)
